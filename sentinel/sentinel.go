@@ -125,9 +125,18 @@ func (s *Sentinel) process(filename string) ([]Event, error) {
 	}
 	knownChecksum, seen := s.KnownObjects[filename]
 	if !seen {
-		evs = append(evs, Event{Evtype: evCreate, NewChecksum: checksum, File: filename})
+		evs = append(evs, Event{
+			Evtype:      evCreate,
+			NewChecksum: checksum,
+			File:        filename,
+		})
 	} else if knownChecksum != checksum {
-		evs = append(evs, Event{Evtype: evModify, OrigChecksum: knownChecksum, NewChecksum: checksum, File: filename})
+		evs = append(evs, Event{
+			Evtype:       evModify,
+			OrigChecksum: knownChecksum,
+			NewChecksum:  checksum,
+			File:         filename,
+		})
 	}
 	s.KnownObjects[filename] = checksum
 
