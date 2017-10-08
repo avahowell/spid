@@ -15,26 +15,26 @@ import (
 	"golang.org/x/crypto/scrypt"
 )
 
-// Sentinel is a scanner that can be used to securely detect and record file
+// Sentinel is a Scanner that can be used to securely detect and record file
 // integrity changes for a set of files.
 type Sentinel struct {
 	WatchFiles   []string
 	KnownObjects map[string]checksum
-	PriorScans   []scan
+	PriorScans   []Scan
 }
 
-// Event defines a file integrity event.
-type event struct {
+// Event defines a file integrity Event.
+type Event struct {
 	Evtype       string
 	OrigChecksum checksum
 	NewChecksum  checksum
 	File         string
 }
 
-// scan stores the information from a single sentinal scan event.
-type scan struct {
+// Scan stores the information from a single sentinal Scan Event.
+type Scan struct {
 	Timestamp time.Time
-	Events    []event
+	Events    []Event
 }
 
 // Config defines the configuration for a sentinel.
@@ -86,9 +86,9 @@ func New(config Config) *Sentinel {
 }
 
 // Scan checks the files watched by the sentinel and returns relevant integrity
-// events.
-func (s *Sentinel) Scan() ([]event, error) {
-	var evs []event
+// Events.
+func (s *Sentinel) Scan() ([]Event, error) {
+	var evs []Event
 	for _, wf := range s.WatchFiles {
 		checksum, err := checksumFile(wf)
 		if err != nil {
@@ -96,13 +96,13 @@ func (s *Sentinel) Scan() ([]event, error) {
 		}
 		knownChecksum, seen := s.KnownObjects[wf]
 		if !seen {
-			evs = append(evs, event{Evtype: evCreate, NewChecksum: checksum, File: wf})
+			evs = append(evs, Event{Evtype: evCreate, NewChecksum: checksum, File: wf})
 		} else if knownChecksum != checksum {
-			evs = append(evs, event{Evtype: evModify, OrigChecksum: knownChecksum, NewChecksum: checksum, File: wf})
+			evs = append(evs, Event{Evtype: evModify, OrigChecksum: knownChecksum, NewChecksum: checksum, File: wf})
 		}
 		s.KnownObjects[wf] = checksum
 	}
-	s.PriorScans = append(s.PriorScans, scan{
+	s.PriorScans = append(s.PriorScans, Scan{
 		Timestamp: time.Now(),
 		Events:    evs,
 	})
