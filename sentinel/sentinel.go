@@ -109,6 +109,8 @@ func (s *Sentinel) Scan() ([]event, error) {
 	return evs, nil
 }
 
+// Save writes the sentinel to the path supplied in `path`, encrypting the
+// sentinel using the password provided to `password.
 func (s *Sentinel) Save(path string, password string) error {
 	var nonce, salt [24]byte
 	_, err := io.ReadFull(rand.Reader, nonce[:])
@@ -142,6 +144,7 @@ func (s *Sentinel) Save(path string, password string) error {
 	return gob.NewEncoder(f).Encode(out)
 }
 
+// Open loads a sentinel from disk using the supplied `path` and `password`.
 func Open(path string, password string) (*Sentinel, error) {
 	var in SentinelFile
 	f, err := os.Open(path)
