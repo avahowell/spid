@@ -93,7 +93,7 @@ func scanCmd(dbPath string) error {
 	}
 	fmt.Println("\nPrior scans:")
 	for _, sc := range s.PriorScans {
-		fmt.Printf("[%v]: \n", sc.Timestamp.String())
+		fmt.Printf("\n[%v]: \n", sc.Timestamp.String())
 		if len(sc.Events) == 0 {
 			fmt.Println("    No changes detected.")
 		}
