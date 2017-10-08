@@ -5,8 +5,59 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 )
+
+// createRandFile is a helper function used to create the file at path with
+// size random bytes
+func createRandFile(path string, size int64) (*os.File, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	_, err = io.CopyN(f, rand.Reader, size)
+	return f, err
+}
+
+// TestWatchFileDirectory verifies that the sentinel watches specified
+// directories recursively.
+func TestWatchFileDirectory(t *testing.T) {
+	dir, err := ioutil.TempDir("", t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fileHandles []*os.File
+	for _, subfile := range []string{"file1", "file2"} {
+		f, err := createRandFile(filepath.Join(dir, subfile), 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(f.Name())
+		fileHandles = append(fileHandles, f)
+	}
+	err = os.Mkdir(filepath.Join(dir, "testsubdir"), 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subfile := range []string{"file3", "file4"} {
+		f, err := createRandFile(filepath.Join(dir, subfile), 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(f.Name())
+		fileHandles = append(fileHandles, f)
+	}
+	s := New(Config{[]string{dir}})
+	evs, err := s.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 4 {
+		t.Fatal("wrong number of events, got", len(evs), "wanted 4")
+	}
+}
 
 // TestSentinel verifies that sentinel generates correct integrity events when
 // file changes occur.
@@ -35,7 +86,7 @@ func TestSentinel(t *testing.T) {
 	}
 
 	// construct a sentinel and watch those files.
-	s := New(sentinelConfig{files})
+	s := New(Config{files})
 
 	// first scan should result in 3 creation events
 	ev, err := s.Scan()

@@ -9,56 +9,68 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/crypto/scrypt"
 )
 
-// Sentinel is a Scanner that can be used to securely detect and record file
-// integrity changes for a set of files.
-type Sentinel struct {
-	WatchFiles   []string
-	KnownObjects map[string]checksum
-	PriorScans   []Scan
-}
+type (
+	// Sentinel is a Scanner that can be used to securely detect and record file
+	// integrity changes for a set of files.
+	Sentinel struct {
+		WatchFiles   []string
+		KnownObjects map[string]checksum
+		PriorScans   []Scan
+	}
 
-// Event defines a file integrity Event.
-type Event struct {
-	Evtype       string
-	OrigChecksum checksum
-	NewChecksum  checksum
-	File         string
-}
+	// Event defines a file integrity Event.
+	Event struct {
+		Evtype       string
+		OrigChecksum checksum
+		NewChecksum  checksum
+		File         string
+	}
 
-// Scan stores the information from a single sentinal Scan Event.
-type Scan struct {
-	Timestamp time.Time
-	Events    []Event
-}
+	// Scan stores the information from a single sentinal Scan Event.
+	Scan struct {
+		Timestamp time.Time
+		Events    []Event
+	}
 
-// Config defines the configuration for a sentinel.
-type Config struct {
-	WatchFiles []string
-}
+	// Config defines the configuration for a sentinel.
+	Config struct {
+		WatchFiles []string
+	}
 
-// SentinelFile stores the data used to encode a sentinel.
-type SentinelFile struct {
-	Data  []byte
-	Nonce [24]byte
-	Salt  [24]byte
-}
+	// SentinelFile stores the data used to encode a sentinel.
+	SentinelFile struct {
+		Data  []byte
+		Nonce [24]byte
+		Salt  [24]byte
+	}
 
-type checksum string
+	checksum string
+)
 
-const evCreate = "EV_CREATE"
-const evModify = "EV_MODIFY"
 const (
+	evCreate = "EV_CREATE"
+	evModify = "EV_MODIFY"
+
 	scryptN = 16384
 	scryptP = 1
 	scryptR = 8
 	keyLen  = 32
 )
+
+// New creates a new sentinel using the options specified in config.
+func New(config Config) *Sentinel {
+	return &Sentinel{
+		WatchFiles:   config.WatchFiles,
+		KnownObjects: make(map[string]checksum),
+	}
+}
 
 // checksumFile returns the sha256 checksum of the file at the provided path.
 func checksumFile(path string) (checksum, error) {
@@ -77,12 +89,49 @@ func checksumFile(path string) (checksum, error) {
 	return checksum(hex.EncodeToString(h.Sum(nil))), nil
 }
 
-// New creates a new sentinel using the options specified in config.
-func New(config Config) *Sentinel {
-	return &Sentinel{
-		WatchFiles:   config.WatchFiles,
-		KnownObjects: make(map[string]checksum),
+// process returns a slice of events produced by scanning the supplied
+// filename. filenames which are directories are scanned recursively.
+func (s *Sentinel) process(filename string) ([]Event, error) {
+	var evs []Event
+
+	finfo, err := os.Stat(filename)
+	if err != nil {
+		return nil, err
 	}
+	if finfo.IsDir() {
+		err = filepath.Walk(filename, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if path == filename {
+				return nil
+			}
+			subevs, err := s.process(path)
+			if err != nil {
+				return err
+			}
+			evs = append(evs, subevs...)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return evs, nil
+	}
+
+	checksum, err := checksumFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	knownChecksum, seen := s.KnownObjects[filename]
+	if !seen {
+		evs = append(evs, Event{Evtype: evCreate, NewChecksum: checksum, File: filename})
+	} else if knownChecksum != checksum {
+		evs = append(evs, Event{Evtype: evModify, OrigChecksum: knownChecksum, NewChecksum: checksum, File: filename})
+	}
+	s.KnownObjects[filename] = checksum
+
+	return evs, nil
 }
 
 // Scan checks the files watched by the sentinel and returns relevant integrity
@@ -90,17 +139,11 @@ func New(config Config) *Sentinel {
 func (s *Sentinel) Scan() ([]Event, error) {
 	var evs []Event
 	for _, wf := range s.WatchFiles {
-		checksum, err := checksumFile(wf)
+		ev, err := s.process(wf)
 		if err != nil {
 			return nil, err
 		}
-		knownChecksum, seen := s.KnownObjects[wf]
-		if !seen {
-			evs = append(evs, Event{Evtype: evCreate, NewChecksum: checksum, File: wf})
-		} else if knownChecksum != checksum {
-			evs = append(evs, Event{Evtype: evModify, OrigChecksum: knownChecksum, NewChecksum: checksum, File: wf})
-		}
-		s.KnownObjects[wf] = checksum
+		evs = append(evs, ev...)
 	}
 	s.PriorScans = append(s.PriorScans, Scan{
 		Timestamp: time.Now(),
@@ -136,6 +179,8 @@ func (s *Sentinel) Save(path string, password string) error {
 
 	data := secretbox.Seal(nonce[:], encoded.Bytes(), &nonce, &secret)
 	out := SentinelFile{Data: data, Nonce: nonce, Salt: salt}
+	// TODO: this is unsafe, since a write can partially complete. Switch to
+	// write temp/rename for better atomicity.
 	f, err := os.Create(path)
 	if err != nil {
 		return err
